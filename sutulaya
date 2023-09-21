@@ -1,31 +1,82 @@
----
-- name: Настройка tacacs-server host
-  hosts: ваш_роутер
-  gather_facts: no  # Отключаем сбор фактов
+from Alina import gomunkul
+from netmiko import ConnectHandler
+from netmiko.ssh_autodetect import SSHDetect
+from netmiko.ssh_dispatcher import ConnectHandler
+import concurrent.futures
+import pandas as pd
+import openpyxl
+import saryshayan
 
-  tasks:
-    - name: Получить текущий hostname
-      ios_command:
-        commands:
-          - show running-config | include hostname
-      register: current_hostname_output
-      changed_when: false  # Не помечать задачу как измененную
 
-    - name: Извлечь текущий hostname из вывода
-      set_fact:
-        current_hostname: "{{ current_hostname_output.stdout_lines[0] | regex_replace('hostname (.*)', '\\1') }}"
-      when: current_hostname_output.stdout_lines | length > 0
 
-    - name: Установить tacacs-server host
-      ios_command:
-        commands:
-          - "tacacs-server host 172.21.106.101 timeout 10 key {{ current_hostname }}"
-      when: current_hostname is defined
+dataframe = openpyxl.load_workbook('data.xlsx')
+dataframe1 = dataframe.active
+ips = []
+for row in range(1, dataframe1.max_row):
+    for col in dataframe1.iter_cols(1, max_col = 1):
+        ips.append(col[row].value)
 
-- name: Сохранить конфигурацию
-  hosts: ваш_роутер
-  tasks:
-    - name: Записать текущую конфигурацию
-      ios_command:
-        commands:
-          - write memory
+
+def default_ip(ips):
+    try:
+        R = {'device_type' : 'cisco_ios',
+             'ip' : ips,
+             'username' : 'netadmin',
+             'password' : 'Umka414414@'
+            }
+        ssh_connect= ConnectHandler(**R)
+        result = ssh_connect.send_command('sh ip route static')
+        result1 = result.splitlines()
+        stat = ''
+        for i in result1:
+            if len(i) > 0:    
+                if i.split()[0] == 'S*':
+                    stat = i.split()[4]
+        return {ips: ['UP', stat]}
+    except Exception as error:
+        exception_type = type(error).__name__
+        # print(f"""- - - - - -   {exception_type}   - - - - - - """)
+
+    
+    try:
+        R = {'device_type' : 'huawei',
+             'ip' : ips,
+             'username' : 'netadmin',
+             'password' : 'Umka414414@'
+            }
+        ssh_connect= ConnectHandler(**R)
+        result = ssh_connect.send_command('display ip routing-table')
+        result1 = result.splitlines()
+        static = ''
+        for i in result1:
+            if 'Static' in i:    
+                static = i.split()[5]
+        return {ips: ['UP', static]}
+    except Exception as error:
+        exception_type = type(error).__name__
+        # print(f"""- - - - - -   {exception_type}   - - - - - - """)
+
+if __name__ == "__main__":
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as exe:
+        l = []
+        result = exe.map(default_ip, ips)
+        default = list(result)
+        final = {}
+    for i in default:
+        if i != None:
+            final.update(i) 
+
+    xfile = openpyxl.load_workbook("data.xlsx")
+    sheet = xfile['Лист1']
+
+    for row in sheet.iter_rows(min_row=1, min_col=3, max_row=11, max_col=3):
+        for cell in row:
+            for k, v in final.items():
+                if k == sheet[f'A{cell.row}'].value:
+                    sheet[f'B{cell.row}'] = v[0]
+                    sheet[f'C{cell.row}'] = v[1]
+                # else:
+                #     sheet[f'B{cell.row}'] = 'UNR'
+                #     sheet[f'C{cell.row}'] = 'UNR'
+
+    xfile.save("data.xlsx")

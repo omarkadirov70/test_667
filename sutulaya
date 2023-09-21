@@ -1,0 +1,31 @@
+---
+- name: Настройка tacacs-server host
+  hosts: ваш_роутер
+  gather_facts: no  # Отключаем сбор фактов
+
+  tasks:
+    - name: Получить текущий hostname
+      ios_command:
+        commands:
+          - show running-config | include hostname
+      register: current_hostname_output
+      changed_when: false  # Не помечать задачу как измененную
+
+    - name: Извлечь текущий hostname из вывода
+      set_fact:
+        current_hostname: "{{ current_hostname_output.stdout_lines[0] | regex_replace('hostname (.*)', '\\1') }}"
+      when: current_hostname_output.stdout_lines | length > 0
+
+    - name: Установить tacacs-server host
+      ios_command:
+        commands:
+          - "tacacs-server host 172.21.106.101 timeout 10 key {{ current_hostname }}"
+      when: current_hostname is defined
+
+- name: Сохранить конфигурацию
+  hosts: ваш_роутер
+  tasks:
+    - name: Записать текущую конфигурацию
+      ios_command:
+        commands:
+          - write memory
